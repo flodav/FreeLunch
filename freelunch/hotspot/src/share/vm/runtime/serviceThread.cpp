@@ -31,6 +31,9 @@
 #include "services/gcNotifier.hpp"
 #include "services/diagnosticArgument.hpp"
 #include "services/diagnosticFramework.hpp"
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 ServiceThread* ServiceThread::_instance = NULL;
 
@@ -77,6 +80,9 @@ void ServiceThread::initialize() {
 
     Threads::add(thread);
     Thread::start(thread);
+/* +EDIT */
+    FreeLunchRecordData::recordThreadName(thread->osthread()->th_id, thread->get_thread_name());
+/* -EDIT */
   }
 }
 

@@ -353,6 +353,7 @@ stringStream::~stringStream() {}
 xmlStream*   xtty;
 outputStream* tty;
 outputStream* gclog_or_tty;
+outputStream* monitor_stream; /* +EDIT */
 extern Mutex* tty_lock;
 
 #define EXTRACHARLEN   32
@@ -1069,6 +1070,11 @@ void ostream_init() {
     // for a time stamp. So, here, we explicitly update the time stamp
     // of tty.
     tty->time_stamp().update_to(1);
+/* +EDIT */
+    char buffer[50];
+    sprintf(buffer, "monitor_contention.%d\0", getpid());
+    monitor_stream = new(ResourceObj::C_HEAP, mtInternal) fileStream(buffer);
+/* -EDIT */
   }
 }
 

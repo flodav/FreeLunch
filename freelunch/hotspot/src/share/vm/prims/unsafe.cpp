@@ -1203,6 +1203,12 @@ UNSAFE_ENTRY(jboolean, Unsafe_CompareAndSwapLong(JNIEnv *env, jobject unsafe, jo
   }
 UNSAFE_END
 
+/* +EDIT */
+#ifdef WITH_PROGRESSIVE_WAIT
+long long tab_park_time[MAX_THREADS];
+long long current_phase_park_time = 0;
+#endif
+/* -EDIT */
 UNSAFE_ENTRY(void, Unsafe_Park(JNIEnv *env, jobject unsafe, jboolean isAbsolute, jlong time))
   UnsafeWrapper("Unsafe_Park");
   EventThreadPark event;
@@ -1212,8 +1218,28 @@ UNSAFE_ENTRY(void, Unsafe_Park(JNIEnv *env, jobject unsafe, jboolean isAbsolute,
    HOTSPOT_THREAD_PARK_BEGIN(
                              (uintptr_t) thread->parker(), (int) isAbsolute, time);
 #endif /* USDT2 */
+/* +EDIT */
+#ifdef WITH_PROGRESSIVE_WAIT
+  unsigned long start_1, start_2;
+  unsigned long long start;
+  int id = thread->osthread()->th_id;
+  RDTSCP(start_1, start_2);
+  start = start_1 | (start_2 << 32);
+  tab_park_time[id] = start;
+#endif
+/* -EDIT */
+
   JavaThreadParkedState jtps(thread, time != 0);
   thread->parker()->park(isAbsolute != 0, time);
+
+/* +EDIT */
+#ifdef WITH_PROGRESSIVE_WAIT
+  RDTSCP(start_1, start_2);
+  unsigned long long duration = (start_1 | (start_2 << 32)) - tab_park_time[id];
+  tab_park_time[id] = 0;
+  Atomic::add_ptr(duration, &current_phase_park_time);
+#endif
+/* -EDIT */
 #ifndef USDT2
   HS_DTRACE_PROBE1(hotspot, thread__park__end, thread->parker());
 #else /* USDT2 */

@@ -90,6 +90,9 @@
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
 #endif
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 static jint CurrentVersion = JNI_VERSION_1_8;
 
@@ -5334,6 +5337,10 @@ static jint attach_current_thread(JavaVM *vm, void **penv, void *_args, bool dae
     delete thread;
     return JNI_ERR;
   }
+/* +EDIT */
+  FreeLunchRecordData::recordThreadName(thread->osthread()->th_id, thread->get_thread_name());
+/* -EDIT */
+
   // Enable stack overflow checks
   thread->create_stack_guard_pages();
 

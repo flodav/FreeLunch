@@ -33,6 +33,9 @@
 #include "runtime/handles.inline.hpp"
 #include "runtime/os.hpp"
 #include "runtime/thread.hpp"
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 GCTaskThread::GCTaskThread(GCTaskManager* manager,
                            uint           which,
@@ -52,6 +55,9 @@ GCTaskThread::GCTaskThread(GCTaskManager* manager,
   }
   set_id(which);
   set_name("GC task thread#%d (ParallelGC)", which);
+/* +EDIT */
+  FreeLunchRecordData::recordThreadName(this->osthread()->th_id, name());
+/* -EDIT */
 }
 
 GCTaskThread::~GCTaskThread() {

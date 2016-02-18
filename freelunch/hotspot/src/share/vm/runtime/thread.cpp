@@ -59,6 +59,9 @@
 #include "runtime/mutexLocker.hpp"
 #include "runtime/objectMonitor.hpp"
 #include "runtime/osThread.hpp"
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 #include "runtime/safepoint.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/statSampler.hpp"
@@ -1232,6 +1235,9 @@ WatcherThread::WatcherThread() : Thread(), _crash_protection(NULL) {
   assert(watcher_thread() == NULL, "we can only allocate one WatcherThread");
   if (os::create_thread(this, os::watcher_thread)) {
     _watcher_thread = this;
+/* +EDIT */
+    FreeLunchRecordData::recordThreadName(_watcher_thread->osthread()->th_id, name());
+/* -EDIT */
 
     // Set the watcher thread to the highest OS priority which should not be
     // used, unless a Java thread with priority java.lang.Thread.MAX_PRIORITY
@@ -3301,6 +3307,11 @@ void Threads::threads_do(ThreadClosure* tc) {
   // If CompilerThreads ever become non-JavaThreads, add them here
 }
 
+/* +EDIT */
+#ifdef WITH_PROGRESSIVE_WAIT
+extern long long tab_park_time[];
+#endif
+/* -EDIT */
 jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
 
   extern void JDK_Version_init();
@@ -3389,6 +3400,23 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Initialize global data structures and create system classes in heap
   vm_init_globals();
 
+/* +EDIT */
+#ifdef WITH_PHASES
+#ifdef WITH_MONITOR_ASSOCIATION
+  ObjectSynchronizer::initialize_MonitorHashTable();
+#endif
+#ifdef WITH_PROGRESSIVE_WAIT
+  for (int i = 0; i < MAX_THREADS; i++) {
+    tab_park_time[i] = 0;
+    ObjectMonitor::tab_wait_time[i] = 0;
+  }
+#endif
+#ifndef NO_OBJECTMONITOR_LIST
+  ObjectMonitor_list::phase_contended_locks_list = new ObjectMonitor_list(KContentedLocksPhase);
+#endif
+#endif
+/* -EDIT */
+
   // Attach the main thread to this os thread
   JavaThread* main_thread = new JavaThread();
   main_thread->set_thread_state(_thread_in_vm);
@@ -3409,6 +3437,9 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
     *canTryAgain = false; // don't let caller call JNI_CreateJavaVM again
     return JNI_ENOMEM;
   }
+/* +EDIT */
+    FreeLunchRecordData::recordThreadName(main_thread->osthread()->th_id, "Main thread");
+/* -EDIT */
 
   // Enable guard page *after* os::create_main_thread(), otherwise it would
   // crash Linux VM, see notes in os_linux.cpp.
@@ -3451,6 +3482,10 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
 
     if (!os::create_thread(vmthread, os::vm_thread))
       vm_exit_during_initialization("Cannot create VM thread. Out of system resources.");
+
+/* +EDIT */
+    FreeLunchRecordData::recordThreadName(vmthread->osthread()->th_id, vmthread->name());
+/* -EDIT */
 
     // Wait for the VM thread to become ready, and VMThread::run to initialize
     // Monitors can have spurious returns, must always check another state flag

@@ -26,16 +26,60 @@
 #include "oops/oop.inline.hpp"
 #include "runtime/osThread.hpp"
 
+/* +EDIT */
+intptr_t  OSThread::th_id_counter = -1;
+long long OSThread::th_start          [MAX_THREADS];
+long long OSThread::th_stop           [MAX_THREADS];
+
+long long OSThread::th_cs_time        [MAX_THREADS];
+long long OSThread::th_wait_time      [MAX_THREADS];
+
+// Name and type of threads.
+char*     OSThread::th_name           [MAX_THREADS];
+int       OSThread::th_type           [MAX_THREADS];
+
+// Array of all OSThread created
+OSThread* OSThread::osthread_array    [MAX_THREADS];
+
+// For debug purposes only.
+long long OSThread::th_cs_start       [MAX_THREADS];
+long long OSThread::th_cs_recursions  [MAX_THREADS];
+/* -EDIT */
 
 OSThread::OSThread(OSThreadStartFunc start_proc, void* start_parm) {
   pd_initialize();
   set_start_proc(start_proc);
   set_start_parm(start_parm);
   set_interrupted(false);
+/* +EDIT */
+  intptr_t id = Atomic::add_ptr(1, &th_id_counter);
+  th_id = id;
+  guarantee(th_id < MAX_THREADS, "Too much thread for thread arrays");
+  guarantee(th_id >= 0, "ID error");
+
+  cs_start = cs_recursions = cs_time = wait_time = cs_wait_time_tmp = 0;
+
+  unsigned long start_1, start_2;
+  RDTSC(start_1, start_2);
+  OSThread::th_start[th_id]       = start_1 | (start_2 << 32);
+  OSThread::osthread_array[th_id] = this;
+/* -EDIT */
 }
 
 OSThread::~OSThread() {
   pd_destroy();
+/* +EDIT */
+  unsigned long stop_1, stop_2;
+  RDTSC(stop_1, stop_2);
+  OSThread::th_stop[th_id]          = stop_1 | (stop_2 << 32);
+
+  OSThread::th_cs_time[th_id]        = cs_time;
+  OSThread::th_wait_time[th_id]      = wait_time;
+  OSThread::th_cs_start[th_id]       = cs_start;
+  OSThread::th_cs_recursions[th_id]  = cs_recursions;
+
+  OSThread::osthread_array[th_id]    = NULL;
+/* -EDIT */
 }
 
 // Printing

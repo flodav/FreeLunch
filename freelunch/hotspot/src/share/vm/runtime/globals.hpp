@@ -1114,6 +1114,57 @@ class CommandLineFlags {
           "(Unsafe, Unstable) "                                             \
           "Control emission of inline sync fast-path code")                 \
                                                                             \
+  /* +EDIT */                                                               \
+  product(intx, EnableRegularSafepoint, 0,                                  \
+          "Enable safepoints at regular intervals (in ms.)"                 \
+          "Disabled by default.")                                           \
+                                                                            \
+  product(intx, MinimumTimeBetweenTwoPhases, 1000,                          \
+          "Minimum time between 2 phases (in ms.)"                          \
+          "Used to avoid too many safepoints during a small amount of time" \
+          "Disabled by default.")                                           \
+                                                                            \
+  product(uintx, CSPThreshold, 0,                                           \
+          "Print the current phase CSP only if the value is above the"      \
+          "provided value"                                                  \
+          "Disabled by default.")                                           \
+                                                                            \
+  product(ccstr, CSPForClass, NULL,                                         \
+          "Compute the CSP only for locks of the specified class"           \
+          "For instance: java.util.Hashtable"                               \
+          "Disabled by default.")                                           \
+                                                                            \
+  product(float, CSPThresholdSummary, 0.01,                                 \
+          "Do not print locks for which the CSP "                           \
+          "is below the provided value"                                     \
+          "Default value is 0.01.")                                         \
+                                                                            \
+  product(uintx, KContentedLocksPhase, 1,                                   \
+          "Show the K most contented locks for each phase")                 \
+                                                                            \
+  product(int, StackFramesDisplayedCount, 10,                               \
+          "The number of frames printed for each stack trace"               \
+          "Maximum sets to 80. Change the MAX_STACK_DEPTH macro"            \
+          "to display more")                                                \
+                                                                            \
+  product(bool, PrintLockCSPSummary, true,                                  \
+          "Print a summary of the average CSP for"                          \
+          "every lock of the application")                                  \
+                                                                            \
+  product(bool, PrintLockStackTraceSummary, true,                           \
+          "Print the stack trace for every lock of the application")        \
+                                                                            \
+  product(bool, PrintLockingFrequencyStat, false,                           \
+          "and COUNT_WAITED enabled in macros.hpp to work")                 \
+                                                                            \
+  product(bool, PrintThreadStats, false,                                    \
+          "Stats about thread CSP. Not working")                            \
+                                                                            \
+  product(bool, TraceMonitorCount, false,                                   \
+          "Trace Monitors InCirculation, Scavenged,...")                    \
+                                                                            \
+/* -EDIT */                                                                 \
+                                                                            \
   product(intx, MonitorBound, 0, "Bound Monitor population")                \
                                                                             \
   product(bool, MonitorInUseLists, false, "Track Monitors for Deflation")   \

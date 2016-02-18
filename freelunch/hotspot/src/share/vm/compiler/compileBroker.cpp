@@ -987,6 +987,15 @@ CompilerThread* CompileBroker::make_compiler_thread(const char* name, CompileQue
     compiler_thread->set_compiler(comp);
     Threads::add(compiler_thread);
     Thread::start(compiler_thread);
+/* +EDIT */
+    {
+      ResourceMark rm;
+      const char* str = compiler_thread->get_thread_name();
+      u_char *p = NEW_C_HEAP_ARRAY(u_char, strlen(str) + 1, mtInternal);
+      strcpy((char*) p, str);
+      OSThread::th_name[compiler_thread->osthread()->th_id] = (char*) p;
+    }
+/* -EDIT */
   }
 
   // Let go of Threads_lock before yielding

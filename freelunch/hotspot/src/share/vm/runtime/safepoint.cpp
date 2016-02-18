@@ -80,6 +80,10 @@
 #ifdef COMPILER1
 #include "c1/c1_globals.hpp"
 #endif
+/* +EDIT */
+#include "runtime/objectMonitor.hpp"
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 // --------------------------------------------------------------------------------------------------
 // Implementation of Safepoint begin/end
@@ -93,9 +97,48 @@ static volatile int PageArmed = 0 ;        // safepoint polling page is RO|RW vs
 static volatile int TryingToBlock = 0 ;    // proximate value -- for advisory use only
 static bool timeout_error_printed = false;
 
+/* +EDIT */
+#ifdef WITH_PHASES
+static long long prev_phase_thread_divider    = 1;
+static long long current_phase_thread_divider = 0;
+
+static long _end_safepoint_ms     = 0;
+long _end_last_phase_ms           = 0;
+
+extern long long current_phase_cs_time;
+extern long long current_phase_wait_time;
+
+long long _current_phase_time    = 0, _prev_phase_time = 0;
+long      _current_phase_time_ms = 0;
+
+long long _prev_phase_duration = 0;
+long long  previous_phase_CSP_divider = 1;
+#ifdef WITH_PROGRESSIVE_WAIT
+extern long long tab_park_time[];
+extern long long current_phase_park_time;
+extern long long test;
+#endif
+
+static long long accumulated_phase_park_time = 0;
+static long long cpu_time_msec               = 0;
+
+long long minimum_time_between_phases        = 0;
+
+#ifdef COUNT_LOCKED
+long long SafepointSynchronize::phase_locked = 0;
+long long SafepointSynchronize::total_locked = 0;
+#endif
+
+#ifdef COUNT_WAITED
+long long SafepointSynchronize::phase_waited = 0;
+long long SafepointSynchronize::total_waited = 0;
+#endif
+
+#endif
+/* -EDIT */
+
 // Roll all threads forward to a safepoint and suspend them all
 void SafepointSynchronize::begin() {
-
   Thread* myThread = Thread::current();
   assert(myThread->is_VM_thread(), "Only VM thread may execute a safepoint");
 
@@ -491,6 +534,12 @@ void SafepointSynchronize::end() {
 #endif // INCLUDE_ALL_GCS
   // record this time so VMThread can keep track how much time has elasped
   // since last safepoint.
+
+/* +EDIT */
+#ifdef WITH_PHASES
+  SafepointSynchronize::compute_phase_statistics();
+#endif
+/* -EDIT */
   _end_of_last_safepoint = os::javaTimeMillis();
 }
 
@@ -500,13 +549,176 @@ bool SafepointSynchronize::is_cleanup_needed() {
   return false;
 }
 
+/* +EDIT */
+#ifdef WITH_PHASES
+void SafepointSynchronize::compute_phase_statistics() {
+  if (CYCLES_TO_MILLISEC(_current_phase_time - _prev_phase_time) >= minimum_time_between_phases) {
+    //long long number_of_threads = std::max(current_phase_thread_divider, prev_phase_thread_divider);
+    long long number_of_threads = MAX2(current_phase_thread_divider, (long long) prev_phase_thread_divider);
+    prev_phase_thread_divider = number_of_threads;
+    number_of_threads = number_of_threads - 4; // substract wait threads
 
+    long long CSP_divider = (float) ((_current_phase_time - _prev_phase_time) * number_of_threads - current_phase_wait_time - accumulated_phase_park_time);
+    float CSP = current_phase_cs_time * 100 / (float) CSP_divider;
+
+    // Average CSP
+    // application_time += (_current_phase_time - _prev_phase_time) * number_of_threads - current_phase_wait_time - accumulated_phase_park_time;
+
+    if (CSP >= CSPThreshold) {
+
+      /****/ // Display current phase statistics
+      monitor_stream->print_cr("*****  Elapsed time: %ld ms. | Phase average CSP: %.2f%%",
+      			       _current_phase_time_ms - FreeLunchStats::_start_application_time_ms, CSP);
+
+#ifdef COUNT_LOCKED
+      monitor_stream->print_cr("%lld lock acquisitions, %.2f lock acquisitions /ms.",
+			       phase_locked,
+			       (float) phase_locked / (float) CYCLES_TO_MILLISEC(_current_phase_time - _prev_phase_time));
+#endif
+#ifdef COUNT_WAITED
+      monitor_stream->print_cr("%lld calls to Object.wait(), %.2f calls to Object.wait() /ms.|",
+			       phase_waited,
+			       (float) phase_waited / (float) CYCLES_TO_MILLISEC(_current_phase_time - _prev_phase_time));
+#endif
+
+      // monitor_stream->print("(%lld * 100 /  (%lld * %lld - %lld - %lld)(%lld)|",
+      // 			    CYCLES_TO_MILLISEC(current_phase_cs_time),
+      // 			    CYCLES_TO_MILLISEC(_current_phase_time - _prev_phase_time),
+      // 			    number_of_threads,
+      // 			    CYCLES_TO_MILLISEC(current_phase_wait_time),
+      // 			    CYCLES_TO_MILLISEC(accumulated_phase_park_time),
+      // 			    CYCLES_TO_MILLISEC((_current_phase_time - _prev_phase_time) * number_of_threads - current_phase_wait_time - accumulated_phase_park_time));
+
+#ifndef NO_OBJECTMONITOR_LIST
+      // // List N locks with the most important CSP during the last phase.
+      ObjectMonitor_list::reverse_iterator rit;
+      int count = 1;
+      for (rit = ObjectMonitor_list::phase_contended_locks_list->rbegin();
+      	   rit != ObjectMonitor_list::phase_contended_locks_list->rend();
+      	   rit++, count++) {
+      	ObjectMonitor* m = *rit;
+      	monitor_stream->print_cr("%2d - Phase CSP: %.2f %%, Class: %s  (%d total frames)",
+      				 count,
+				 m->_current_phase_cs_time * 100 / (float) CSP_divider,
+      				 m->_object_klass,
+				 m->current_stack_depth);
+      	m->print_stack_trace(monitor_stream);
+      }
+      ObjectMonitor_list::phase_contended_locks_list->clear();
+#endif
+    }
+
+    _prev_phase_duration = _current_phase_time - _prev_phase_time;
+
+    current_phase_cs_time         = 0;
+    current_phase_wait_time       = 0;
+
+    _prev_phase_time = _current_phase_time;
+    current_phase_thread_divider = 0;
+
+    previous_phase_CSP_divider = CSP_divider;
+#ifdef COUNT_LOCKED
+    total_locked += phase_locked;
+    phase_locked  = 0;
+#endif
+#ifdef COUNT_WAITED
+    total_waited += phase_waited;
+    phase_waited  = 0;
+#endif
+  }
+}
+
+
+
+static void compute_wait_park_time(long long timestamp) {
+#ifdef DEBUG_PROGRESSIVE_WAIT
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  tty->print_cr("[%.6lf] %.2d| RDTSC: %lld", tv.tv_sec+(tv.tv_usec/1000000.0), Thread::current()->osthread()->th_id, timestamp);
+#endif
+
+
+#ifdef WITH_PROGRESSIVE_WAIT
+  for (int i = 0; i < OSThread::th_id_counter; i++) {
+    /****/ // Compute phase wait time
+    if (ObjectMonitor::tab_wait_time[i] != 0) {
+      assert(timestamp - ObjectMonitor::tab_wait_time[i] > 0 , "Error");
+#ifdef DEBUG_PROGRESSIVE_WAIT
+      tty->print_cr("WaitArray [%.6lf] %.2d|%lld -> %lld (+ %lld)",
+		    tv.tv_sec+(tv.tv_usec/1000000.0), i,
+		    ObjectMonitor::tab_wait_time[i], timestamp,
+		    CYCLES_TO_MILLISEC(timestamp - ObjectMonitor::tab_wait_time[i]));
+#endif
+      current_phase_wait_time += timestamp - ObjectMonitor::tab_wait_time[i];
+      ObjectMonitor::tab_wait_time[i] = timestamp;
+    }
+  }
+
+  accumulated_phase_park_time = current_phase_park_time;
+  current_phase_park_time = 0;
+  for (int i = 0; i < OSThread::th_id_counter; i++) {
+    /****/ // Compute phase park time
+    if (tab_park_time[i] != 0) {
+      assert(timestamp - tab_park_time[i] > 0 , "Error");
+#ifdef DEBUG_PROGRESSIVE_WAIT
+      tty->print_cr("ParkArray [%.6lf] %.2d|%lld -> %lld (+ %lld)",
+		    tv.tv_sec+(tv.tv_usec/1000000.0), i,
+		    tab_park_time[i], timestamp,
+		    CYCLES_TO_MILLISEC(timestamp - tab_park_time[i]));
+#endif
+      accumulated_phase_park_time += timestamp - tab_park_time[i];
+      tab_park_time[i] = timestamp;
+    }
+  }
+#endif
+
+}
+#endif
+
+/* +EDIT */
+void SafepointSynchronize::gather_data() { // TODO: change name, merge with compute_wait_park_time()
+#ifdef WITH_PHASES
+
+    // +1  MainThread      in thread.cpp:3125
+
+    // +1  ServiceThread   in serviceThread.cpp:76
+    // +1  SignalThread    in os.cpp:348
+    // +14 CompilerThread  in compileBroker.cpp:849
+    // +2  ListenerThread  in attachListener.cpp:473
+
+    // long long divider = Threads::number_of_threads() - 6; // -4
+    // thread_divider = divider < 0 ? divider : 1; //LLONG_MAX;
+    // current_phase_thread_divider = std::max(current_phase_thread_divider, divider);
+
+    // En soustrayant current_phase_wait_time dans le calcul du CSP
+    long long divider = Threads::number_of_threads(); // - 6; // -4
+    divider = divider > 0 ? divider : 1; //LLONG_MAX;
+    current_phase_thread_divider = MAX2(current_phase_thread_divider, divider);
+
+    unsigned long start_1, start_2;
+    RDTSC(start_1, start_2);
+    _current_phase_time       = start_1 | (start_2 << 32);
+    _current_phase_time_ms    = os::javaTimeMillis();
+
+    if (CYCLES_TO_MILLISEC(_current_phase_time - _prev_phase_time) >= minimum_time_between_phases) {
+      // Current phase statistics
+      ObjectSynchronizer::deflate_idle_monitors();
+      // accumulated_phase_park_time            += current_phase_park_time;
+      compute_wait_park_time(_current_phase_time);
+    }
+#else
+    ObjectSynchronizer::deflate_idle_monitors();
+#endif
+}
+/* -EDIT */
 
 // Various cleaning tasks that should be done periodically at safepoints
 void SafepointSynchronize::do_cleanup_tasks() {
   {
     TraceTime t1("deflating idle monitors", TraceSafepointCleanupTime);
-    ObjectSynchronizer::deflate_idle_monitors();
+/* +EDIT */
+     SafepointSynchronize::gather_data();
+/* -EDIT */
   }
 
   {

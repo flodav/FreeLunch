@@ -336,6 +336,59 @@
 #define NOT_AMD64(code) code
 #endif
 
+/* +EDIT */
+#ifdef AMD64
+
+/****/ // MAX_THREADS defines the maximum number of threads the arrays of runtime/osThread.hpp can contain
+#define MAX_THREADS 10000
+
+/****/ // WITH_MONITOR_ASSOCIATION allows Monitors to be always associated with the first object it was linked with.
+/****/ // Monitors are reassociated based on the Java object's address. It may be not accurate due to GC moving objects during collections.
+#define WITH_MONITOR_ASSOCIATION
+/****/ // MONITOR_ASSOCIATION_STAT prints at every safepoint the number of elements currently inside the MonitorHashtable when defined.
+//#define MONITOR_ASSOCIATION_STAT
+
+/****/ // WITH_PHASES compute the time spent in critical sections between to safepoints.
+#define WITH_PHASES
+
+/****/ // WITH_STACK_TRACE
+#define WITH_STACK_TRACE
+//#define MAX_STACK_DEPTH 16
+#define MAX_STACK_DEPTH 80
+
+/****/ // STACKTRACE_EACH_ACQUISITION
+//#define STACKTRACE_EACH_ACQUISITION
+#define NEW_IMPLEMENTATION
+
+
+/****/ // Various options to enable different method of profiling waiting time for acquiring a lock
+//#define WITH_NORMAL_WAIT
+#define WITH_PROGRESSIVE_WAIT
+//#define DEBUG_PROGRESSIVE_WAIT
+
+/****/ // Lock acquisitions per phase / total
+//#define COUNT_LOCKED
+/****/ // Wait call per phase / total
+//#define COUNT_WAITED
+
+/****/ // NO objectMonitor_list
+//#define NO_OBJECTMONITOR_LIST
+
+#if (defined WITH_NORMAL_WAIT && defined WITH_PROGRESSIVE_WAIT)
+#error "Both WITH_NORMAL_WAIT and WITH_PROGRESSIVE_WAIT are enabled"
+#endif
+
+
+
+/****/ // Various macros for using RDTSC instruction
+#define RDTSC(a, b)  __asm__ ( "rdtsc" : "=a"(a), "=d"(b) );
+#define RDTSCP(a, b) __asm__ __volatile__ ( "rdtsc": "=a"(a), "=d"(b) );
+
+#define CYCLES_TO_MILLISEC(c) ((c) / 2099965)
+
+#endif
+/* -EDIT */
+
 #ifdef SPARC
 #define SPARC_ONLY(code) code
 #define NOT_SPARC(code)

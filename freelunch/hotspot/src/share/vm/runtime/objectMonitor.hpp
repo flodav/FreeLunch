@@ -48,6 +48,9 @@ class ObjectWaiter : public StackObj {
   volatile TStates TState ;
   Sorted        _Sorted ;           // List placement disposition
   bool          _active ;           // Contention monitoring is enabled
+/* +EDIT */
+  long long     _time_notified;
+/* -EDIT */
  public:
   ObjectWaiter(Thread* thread);
 
@@ -135,6 +138,11 @@ class ObjectMonitor {
   ObjectWaiter* next_waiter(ObjectWaiter* o)                           { return o->_next; }
   Thread* thread_of_waiter(ObjectWaiter* o)                            { return o->_thread; }
 
+  /* +EDIT */
+  void print_stack_trace(outputStream *st);
+  void myprint(outputStream *st);
+  /* -EDIT */
+
   // initialize the monitor, exception the semaphore, all other fields
   // are simple integers or pointers
   ObjectMonitor() {
@@ -155,6 +163,26 @@ class ObjectMonitor {
     _SpinClock    = 0 ;
     OwnerIsThread = 0 ;
     _previous_owner_tid = 0;
+/* +EDIT */
+    _cs_start_time          = 0;
+    _total_cs_time          = 0;
+    _prev_total_cs_time     = 0;
+    _prev_phase_cs_time     = 0;
+    _current_phase_cs_time  = 0;
+    _accumulated_CSP        = 0;
+
+    isFromClass    = -1;
+    _object_fst_pointer = NULL;
+    // if (_object_klass != NULL)
+    //   FREE_C_HEAP_ARRAY(char, _object_klass, mtInternal);
+
+    current_stack_depth = 0;
+
+#if (defined WITH_NORMAL_WAIT || defined WITH_PROGRESSIVE_WAIT)
+    _total_wait_time = 0;
+    _prev_total_wait_time = 0;
+#endif
+/* -EDIT */
   }
 
   ~ObjectMonitor() {
@@ -175,6 +203,26 @@ private:
     _cxq           = NULL ;
     _WaitSet       = NULL ;
     _recursions    = 0 ;
+/* +EDIT */
+    _cs_start_time          = 0;
+    _total_cs_time          = 0;
+    _prev_total_cs_time     = 0;
+    _prev_phase_cs_time     = 0;
+    _current_phase_cs_time  = 0;
+    _accumulated_CSP        = 0;
+
+    isFromClass    = -1;
+    _object_fst_pointer = NULL;
+    // if (_object_klass != NULL)
+    //   FREE_C_HEAP_ARRAY(char, _object_klass, mtInternal);
+
+    current_stack_depth = 0;
+
+#if (defined WITH_NORMAL_WAIT || defined WITH_PROGRESSIVE_WAIT)
+    _total_wait_time = 0;
+    _prev_total_wait_time = 0;
+#endif
+/* -EDIT */
     _SpinFreq      = 0 ;
     _SpinClock     = 0 ;
     OwnerIsThread  = 0 ;
@@ -287,6 +335,46 @@ public:
   int _QMix ;                       // Mixed prepend queue discipline
   ObjectMonitor * FreeNext ;        // Free list linkage
   intptr_t StatA, StatsB ;
+/* +EDIT */
+  // isFromClass
+  // -1: Don't know yet if the Java object is an instance of CSPForClass
+  //  1: The Java object is an instance of CSPForClass
+  //  0: The Java object is not an instance of CSPForClass
+  char  isFromClass;
+  void* _object_fst_pointer; // Store the object pointer value during the first inflation (in case if the object is moved later because of GC).
+#ifdef WITH_NORMAL_WAIT
+  long long _total_wait_time;
+  long long _prev_total_wait_time;
+#endif
+#ifdef WITH_PROGRESSIVE_WAIT
+  long long _total_wait_time;
+  long long _prev_total_wait_time;
+  static long long volatile tab_wait_time[MAX_THREADS];
+#endif
+
+  long long _inflated_by_another_thread;
+
+  long long _cs_start_time;
+  long long _total_cs_time;
+  long long _prev_total_cs_time;
+  long long _prev_phase_cs_time;
+  long long _current_phase_cs_time;
+  float     _accumulated_CSP; // The CSP of each phase is added in this variable.
+  /* Stack trace variables */
+  char*     _object_klass;
+
+  typedef struct FrameInfo {
+    Method *method;
+    int location;
+  } FrameInfo;
+#ifdef WITH_MONITOR_ASSOCIATION
+  ObjectMonitor *next;
+  bool           inside;
+#endif
+  FrameInfo      stack_trace[MAX_STACK_DEPTH];
+  int            current_stack_depth;
+/* -EDIT */
+
 
  public:
   static void Initialize () ;

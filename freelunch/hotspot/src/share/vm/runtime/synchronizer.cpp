@@ -52,6 +52,9 @@
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
 #endif
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 #if defined(__GNUC__)
   // Need to inhibit inlining for older versions of GCC to avoid build-time failures
@@ -153,7 +156,18 @@ ObjectMonitor * volatile ObjectSynchronizer::gOmInUseList  = NULL ;
 int ObjectSynchronizer::gOmInUseCount = 0;
 static volatile intptr_t ListLock = 0 ;      // protects global monitor free-list cache
 static volatile int MonitorFreeCount  = 0 ;      // # on gFreeList
-static volatile int MonitorPopulation = 0 ;      // # Extant -- in circulation
+/* +EDIT */
+//static volatile int MonitorPopulation = 0 ;      // # Extant -- in circulation
+volatile int ObjectSynchronizer::MonitorPopulation = 0 ;      // # Extant -- in circulation
+/* -EDIT */
+#ifdef WITH_MONITOR_ASSOCIATION
+#define MONITOR_HASHTABLE_SIZE 16384
+static ObjectMonitor * MonitorHashTable[MONITOR_HASHTABLE_SIZE];
+void ObjectSynchronizer::initialize_MonitorHashTable() {
+  memset(MonitorHashTable, 0, MONITOR_HASHTABLE_SIZE);
+}
+#endif
+/* -EDIT */
 #define CHAINMARKER (cast_to_oop<intptr_t>(-1))
 
 // -----------------------------------------------------------------------------
@@ -909,7 +923,7 @@ static void InduceScavenge (Thread * Self, const char * Whence) {
   // TODO: assert thread state is reasonable
 
   if (ForceMonitorScavenge == 0 && Atomic::xchg (1, &ForceMonitorScavenge) == 0) {
-    if (ObjectMonitor::Knob_Verbose) {
+    if (TraceMonitorCount /*ObjectMonitor::Knob_Verbose*/) {
       ::printf ("Monitor scavenge - Induced STW @%s (%d)\n", Whence, ForceMonitorScavenge) ;
       ::fflush(stdout) ;
     }
@@ -919,7 +933,7 @@ static void InduceScavenge (Thread * Self, const char * Whence) {
     // The VMThread will delete the op when completed.
     VMThread::execute (new VM_ForceAsyncSafepoint()) ;
 
-    if (ObjectMonitor::Knob_Verbose) {
+    if (TraceMonitorCount /*ObjectMonitor::Knob_Verbose*/) { /* +EDIT */
       ::printf ("Monitor scavenge - STW posted @%s (%d)\n", Whence, ForceMonitorScavenge) ;
       ::fflush(stdout) ;
     }
@@ -1247,7 +1261,76 @@ ObjectMonitor * ATTR ObjectSynchronizer::inflate (Thread * Self, oop object) {
       // See the comments in omAlloc().
 
       if (mark->has_locker()) {
-          ObjectMonitor * m = omAlloc (Self) ;
+/* +EDIT */
+#ifdef WITH_MONITOR_ASSOCIATION
+	ObjectMonitor * m = MonitorHashTable[(*((intptr_t *) object)) % MONITOR_HASHTABLE_SIZE];
+	while (m != NULL && (m->object() != (void*) object)) {
+	  m = m->next;
+	}
+
+	if (m == NULL) {
+	    m = omAlloc (Self) ;
+
+          // Optimistically prepare the objectmonitor - anticipate successful CAS
+          // We do this before the CAS in order to minimize the length of time
+          // in which INFLATING appears in the mark.
+          m->Recycle();
+          m->_Responsible  = NULL ;
+          m->OwnerIsThread = 0 ;
+          m->_recursions   = 0 ;
+          m->_SpinDuration = ObjectMonitor::Knob_SpinLimit ;   // Consider: maintain by type/class
+
+	  // Store the stack trace that led to this lock inflation
+	  {
+	    // From JavaThread::print_stack_on()@thread.cpp:3051
+	    JavaThread *java_thread = (JavaThread *) Self;
+
+	    if (java_thread->has_last_Java_frame()) {
+	      ResourceMark rm;
+	      HandleMark   hm;
+
+	      RegisterMap reg_map(java_thread);
+	      vframe* start_vf = java_thread->last_java_vframe(&reg_map);
+	      int count = 0;
+	      for (vframe* f = start_vf; count < MAX_STACK_DEPTH && f; f = f->sender() ) {
+		if (f->is_java_frame()) {
+		  javaVFrame* jvf = javaVFrame::cast(f);
+		  m->stack_trace[count].method   = jvf->method();
+		  m->stack_trace[count].location = jvf->bci();
+		  count++;
+		}
+	      }
+	      m->current_stack_depth = count;
+	    }
+
+	    // Store object klass name
+	    {
+	      ResourceMark rm;
+	      const char *klass = object->klass()->external_name();
+	      int length = strlen(klass) + 1;
+	      m->_object_klass = NEW_C_HEAP_ARRAY(char, length, mtInternal);
+	      strncpy(m->_object_klass, klass, length);
+	    }
+	    // Store object pointer
+	    m->_object_fst_pointer = object;
+	  }
+
+          markOop cmp = (markOop) Atomic::cmpxchg_ptr (markOopDesc::INFLATING(), object->mark_addr(), mark) ;
+          if (cmp != mark) {
+             omRelease (Self, m, true) ;
+             continue ;       // Interference -- just retry
+          }
+
+	} else {
+          markOop cmp = (markOop) Atomic::cmpxchg_ptr (markOopDesc::INFLATING(), object->mark_addr(), mark) ;
+          if (cmp != mark) {
+	    continue ;       // Interference -- just retry
+          }
+	}
+
+#else
+	ObjectMonitor * m = omAlloc (Self) ;
+
           // Optimistically prepare the objectmonitor - anticipate successful CAS
           // We do this before the CAS in order to minimize the length of time
           // in which INFLATING appears in the mark.
@@ -1262,6 +1345,8 @@ ObjectMonitor * ATTR ObjectSynchronizer::inflate (Thread * Self, oop object) {
              omRelease (Self, m, true) ;
              continue ;       // Interference -- just retry
           }
+#endif
+/* -EDIT */
 
           // We've successfully installed INFLATING (0) into the mark-word.
           // This is the only case where 0 will appear in a mark-work.
@@ -1339,7 +1424,86 @@ ObjectMonitor * ATTR ObjectSynchronizer::inflate (Thread * Self, oop object) {
       // would be useful.
 
       assert (mark->is_neutral(), "invariant");
-      ObjectMonitor * m = omAlloc (Self) ;
+/* +EDIT */
+#ifdef WITH_MONITOR_ASSOCIATION
+	ObjectMonitor * m = MonitorHashTable[(*((intptr_t *) object)) % MONITOR_HASHTABLE_SIZE];
+	while (m != NULL && (m->object() != (void*) object)) {
+	  m = m->next;
+	}
+
+	if (m == NULL) {
+	  m = omAlloc (Self) ;
+
+	  // prepare m for installation - set monitor to initial state
+	  m->Recycle();
+	  m->set_header(mark);
+	  m->set_owner(NULL);
+	  m->set_object(object);
+	  m->OwnerIsThread = 1 ;
+	  m->_recursions   = 0 ;
+	  m->_Responsible  = NULL ;
+	  m->_SpinDuration = ObjectMonitor::Knob_SpinLimit ;       // consider: keep metastats by type/class
+
+	  // Store the stack trace that led to this lock inflation
+	  {
+	    // From JavaThread::print_stack_on()@thread.cpp:3051
+	    JavaThread *java_thread = (JavaThread *) Self;
+
+	    if (java_thread->has_last_Java_frame()) {
+	      ResourceMark rm;
+	      HandleMark   hm;
+
+	      RegisterMap reg_map(java_thread);
+	      vframe* start_vf = java_thread->last_java_vframe(&reg_map);
+	      int count = 0;
+	      for (vframe* f = start_vf; count < MAX_STACK_DEPTH && f; f = f->sender() ) {
+		if (f->is_java_frame()) {
+		  javaVFrame* jvf = javaVFrame::cast(f);
+		  m->stack_trace[count].method   = jvf->method();
+		  m->stack_trace[count].location = jvf->bci();
+		  count++;
+		}
+	      }
+	      m->current_stack_depth = count;
+	    }
+
+	    // Store object klass name
+	    {
+	      ResourceMark rm;
+	      const char *klass = object->klass()->external_name();
+	      int length = strlen(klass) + 1;
+	      m->_object_klass = NEW_C_HEAP_ARRAY(char, length, mtInternal);
+	      strncpy(m->_object_klass, klass, length);
+	    }
+	    // Store object pointer
+	    m->_object_fst_pointer = object;
+	  }
+
+	  if (Atomic::cmpxchg_ptr (markOopDesc::encode(m), object->mark_addr(), mark) != mark) {
+	    m->set_object (NULL) ;
+	    m->set_owner  (NULL) ;
+	    m->OwnerIsThread = 0 ;
+	    m->Recycle() ;
+	    omRelease (Self, m, true) ;
+	    m = NULL ;
+	    continue ;
+	    // interference - the markword changed - just retry.
+	    // The state-transitions are one-way, so there's no chance of
+	    // live-lock -- "Inflated" is an absorbing state.
+	  }
+	} else {
+	  if (Atomic::cmpxchg_ptr (markOopDesc::encode(m), object->mark_addr(), mark) != mark) {
+	    continue ;
+	    // interference - the markword changed - just retry.
+	    // The state-transitions are one-way, so there's no chance of
+	    // live-lock -- "Inflated" is an absorbing state.
+	  }
+
+	}
+
+#else
+	ObjectMonitor * m = omAlloc (Self) ;
+
       // prepare m for installation - set monitor to initial state
       m->Recycle();
       m->set_header(mark);
@@ -1362,6 +1526,9 @@ ObjectMonitor * ATTR ObjectSynchronizer::inflate (Thread * Self, oop object) {
           // The state-transitions are one-way, so there's no chance of
           // live-lock -- "Inflated" is an absorbing state.
       }
+
+#endif
+/* -EDIT */
 
       // Hopefully the performance counters are allocated on distinct
       // cache lines to avoid false sharing on MP systems ...
@@ -1417,6 +1584,19 @@ enum ManifestConstants {
     MaximumRecheckInterval  = 1000
 } ;
 
+/* +EDIT */
+#if defined(WITH_MONITOR_ASSOCIATION) && defined(MONITOR_ASSOCIATION_STAT)
+static int MonitorHashTableCount = 0;
+#endif
+
+#ifdef WITH_PHASES
+static long long last_phase_cs_time, last_phase_wait_time;
+long long current_phase_cs_time, current_phase_wait_time;
+extern long long _prev_phase_duration;
+extern long long previous_phase_CSP_divider;
+#endif
+/* -EDIT */
+
 // Deflate a single monitor if not in use
 // Return true if deflated, false if in use
 bool ObjectSynchronizer::deflate_monitor(ObjectMonitor* mid, oop obj,
@@ -1427,38 +1607,139 @@ bool ObjectSynchronizer::deflate_monitor(ObjectMonitor* mid, oop obj,
   guarantee (mid == obj->mark()->monitor(), "invariant");
   guarantee (mid->header()->is_neutral(), "invariant");
 
-  if (mid->is_busy()) {
-     if (ClearResponsibleAtSTW) mid->_Responsible = NULL ;
-     deflated = false;
+  /* +EDIT */
+#ifdef WITH_PHASES
+  mid->_prev_phase_cs_time = mid->_current_phase_cs_time;
+  mid->_current_phase_cs_time = mid->_total_cs_time - mid->_prev_total_cs_time;
+  // The average CSP of the previous phase because now, we have the CSP_divider is computed
+  // Somme de (CSP phase * temps_phase) puis diviser par application_time et multiplier par 100
+  float prev = mid->_accumulated_CSP;
+  double t1, t2, t3;
+  t1 = (float) mid->_prev_phase_cs_time;
+  t2 = (float) previous_phase_CSP_divider;
+  t3 = (float) _prev_phase_duration;
+
+  mid->_accumulated_CSP += (float) ((t1 / t2) * t3);
+  // tty->print_cr("%f| %f / %f -> %f * %f  -> %f",
+  // 		prev,
+  // 		t1,
+  // 		t2,
+  // 		(float) (t1 / t2),
+  // 		t3,
+  // 		mid->_accumulated_CSP);
+
+  //mid->_accumulated_CSP += (float) (_prev_phase_duration * mid->_prev_phase_cs_time / previous_phase_CSP_divider);
+  // tty->print_cr("%f| %llu * %llu -> %f / %llu  -> %f",
+  // 		prev,
+  // 		_prev_phase_duration,
+  // 		mid->_prev_phase_cs_time,
+  // 		(float) (_prev_phase_duration * mid->_prev_phase_cs_time),
+  // 		previous_phase_CSP_divider,
+  // 		mid->_accumulated_CSP);
+  guarantee (mid->_accumulated_CSP >= 0, "");
+
+  if (CSPForClass != NULL) {
+    // printf("Process:%s||", mid->_object_klass);
+
+    if (mid->isFromClass == -1) {
+      if (! strcmp(mid->_object_klass, CSPForClass))
+	mid->isFromClass = 1; // instance of CSPForClass
+      else
+	mid->isFromClass = 0; // not an instance of CSPForClass
+    }
+
+    if (mid->isFromClass == 1) {
+      // Add the current monitor to the phase_contended_locks_list list.
+#ifndef NO_OBJECTMONITOR_LIST
+      ObjectMonitor_list::phase_contended_locks_list->insert(mid);
+#endif 
+      current_phase_cs_time    += mid->_total_cs_time;
+      mid->_prev_total_cs_time  = mid->_total_cs_time;
+    }
   } else {
-     // Deflate the monitor if it is no longer being used
-     // It's idle - scavenge and return to the global free list
-     // plain old deflation ...
-     TEVENT (deflate_idle_monitors - scavenge1) ;
-     if (TraceMonitorInflation) {
-       if (obj->is_instance()) {
-         ResourceMark rm;
-           tty->print_cr("Deflating object " INTPTR_FORMAT " , mark " INTPTR_FORMAT " , type %s",
-                (void *) obj, (intptr_t) obj->mark(), obj->klass()->external_name());
-       }
-     }
+    // Add the current monitor to the phase_contended_locks_list list.
+#ifndef NO_OBJECTMONITOR_LIST
+    ObjectMonitor_list::phase_contended_locks_list->insert(mid);
+#endif
 
-     // Restore the header back to obj
-     obj->release_set_mark(mid->header());
-     mid->clear();
-
-     assert (mid->object() == NULL, "invariant") ;
-
-     // Move the object to the working free list defined by FreeHead,FreeTail.
-     if (*FreeHeadp == NULL) *FreeHeadp = mid;
-     if (*FreeTailp != NULL) {
-       ObjectMonitor * prevtail = *FreeTailp;
-       assert(prevtail->FreeNext == NULL, "cleaned up deflated?"); // TODO KK
-       prevtail->FreeNext = mid;
-      }
-     *FreeTailp = mid;
-     deflated = true;
+    current_phase_cs_time    += mid->_total_cs_time;
+    mid->_prev_total_cs_time  = mid->_total_cs_time; // TODO can be removed by keeping current_phase_cs_time in a variable at the end of safepoint (which will bethe value of _pretotal_cs_time for the next safepoint).
   }
+
+#if (defined WITH_NORMAL_WAIT || defined WITH_PROGRESSIVE_WAIT)
+  current_phase_wait_time    += mid->_total_wait_time;
+  mid->_prev_total_wait_time  = mid->_total_wait_time; // TODO same here
+#endif
+#endif
+  /* -EDIT */
+
+  if (mid->is_busy()) {
+    if (ClearResponsibleAtSTW) mid->_Responsible = NULL ;
+    deflated = false;
+  } else {
+    // Deflate the monitor if it is no longer being used
+    // It's idle - scavenge and return to the global free list
+    // plain old deflation ...
+    TEVENT (deflate_idle_monitors - scavenge1) ;
+    if (TraceMonitorInflation) {
+      if (obj->is_instance()) {
+	ResourceMark rm;
+	tty->print_cr("Deflating object " INTPTR_FORMAT " , mark " INTPTR_FORMAT " , type %s",
+		      (void *) obj, (intptr_t) obj->mark(), obj->klass()->external_name());
+      }
+    }
+    /* +EDIT */
+#ifdef WITH_MONITOR_ASSOCIATION
+    guarantee (!mid->is_busy(), "Test invariant") ;
+    if (! mid->inside) {
+      if (mid->_total_cs_time > 0) {
+#ifdef MONITOR_ASSOCIATION_STAT
+	MonitorHashTableCount++;
+#endif
+	mid->inside = true;
+	uintptr_t index = (*((intptr_t *) obj)) % MONITOR_HASHTABLE_SIZE;;
+	mid->next = MonitorHashTable[index];
+	MonitorHashTable[index] = mid;
+      } else {
+	// Restore the header back to obj
+	obj->release_set_mark(mid->header());
+	mid->clear();
+
+	assert (mid->object() == NULL, "invariant") ;
+
+	// Move the object to the working free list defined by FreeHead,FreeTail.
+	if (*FreeHeadp == NULL) *FreeHeadp = mid;
+	if (*FreeTailp != NULL) {
+	  ObjectMonitor * prevtail = *FreeTailp;
+	  assert(prevtail->FreeNext == NULL, "cleaned up deflated?"); // TODO KK
+	  prevtail->FreeNext = mid;
+	}
+	*FreeTailp = mid;
+      }
+    }
+#else
+    /* -EDIT */
+    // Restore the header back to obj
+    obj->release_set_mark(mid->header());
+    mid->clear();
+
+    assert (mid->object() == NULL, "invariant") ;
+
+    // Move the object to the working free list defined by FreeHead,FreeTail.
+    if (*FreeHeadp == NULL) *FreeHeadp = mid;
+    if (*FreeTailp != NULL) {
+      ObjectMonitor * prevtail = *FreeTailp;
+      assert(prevtail->FreeNext == NULL, "cleaned up deflated?"); // TODO KK
+      prevtail->FreeNext = mid;
+    }
+    *FreeTailp = mid;
+    /* +EDIT */
+#endif
+    /* -EDIT */
+    deflated = true;
+
+  }
+
   return deflated;
 }
 
@@ -1496,7 +1777,7 @@ int ObjectSynchronizer::walk_monitor_list(ObjectMonitor** listheadp,
 }
 
 void ObjectSynchronizer::deflate_idle_monitors() {
-  assert(SafepointSynchronize::is_at_safepoint(), "must be at safepoint");
+  //assert(SafepointSynchronize::is_at_safepoint(), "must be at safepoint"); TODO: replaced this assert
   int nInuse = 0 ;              // currently associated with objects
   int nInCirculation = 0 ;      // extant
   int nScavenged = 0 ;          // reclaimed
@@ -1558,16 +1839,27 @@ void ObjectSynchronizer::deflate_idle_monitors() {
     }
   }
 
+/* +EDIT */
+#if defined(WITH_MONITOR_ASSOCIATION) && defined(MONITOR_ASSOCIATION_STAT)
+  static int previous = 0;
+  if (previous != MonitorHashTableCount)
+    tty->print_cr("MonitorHashTableCount:%d", MonitorHashTableCount);
+  previous = MonitorHashTableCount;
+#endif
+/* -EDIT */
+
   MonitorFreeCount += nScavenged;
 
   // Consider: audit gFreeList to ensure that MonitorFreeCount and list agree.
 
-  if (ObjectMonitor::Knob_Verbose) {
+/* +EDIT */
+  if (TraceMonitorCount /*ObjectMonitor::Knob_Verbose*/) {
     ::printf ("Deflate: InCirc=%d InUse=%d Scavenged=%d ForceMonitorScavenge=%d : pop=%d free=%d\n",
         nInCirculation, nInuse, nScavenged, ForceMonitorScavenge,
-        MonitorPopulation, MonitorFreeCount) ;
+	MonitorPopulation, MonitorFreeCount) ;
     ::fflush(stdout) ;
   }
+/* -EDIT */
 
   ForceMonitorScavenge = 0;    // Reset
 
@@ -1588,6 +1880,23 @@ void ObjectSynchronizer::deflate_idle_monitors() {
   // Audit/inventory the objectMonitors -- make sure they're all accounted for.
   GVars.stwRandom = os::random() ;
   GVars.stwCycle ++ ;
+
+/* +EDIT */
+#ifdef WITH_PHASES
+  assert(current_phase_cs_time   >= last_phase_cs_time,   "current_phase_cs_time   >= last_phase_cs_time");
+  assert(current_phase_wait_time >= last_phase_wait_time, "current_phase_wait_time >= last_phase_wait_time");
+
+  // CS time for the current phase
+  long long tmp = current_phase_cs_time;
+  current_phase_cs_time -= last_phase_cs_time;
+  last_phase_cs_time = tmp;
+
+  // wait() time for the current phase
+  tmp = current_phase_wait_time;
+  current_phase_wait_time -= last_phase_wait_time;
+  last_phase_wait_time = tmp;
+#endif
+/* -EDIT */
 }
 
 // Monitor cleanup on JavaThread::exit

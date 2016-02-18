@@ -36,6 +36,9 @@ class ObjectMonitor;
 
 class ObjectSynchronizer : AllStatic {
   friend class VMStructs;
+/* +EDIT */
+  friend class FreeLunchStats;
+/* -EDIT */
  public:
   typedef enum {
     owner_self,
@@ -112,6 +115,9 @@ class ObjectSynchronizer : AllStatic {
   // GC: we current use aggressive monitor deflation policy
   // Basically we deflate all monitors that are not busy.
   // An adaptive profile-based deflation policy could be used if needed
+/* +EDIT */
+  static void initialize_MonitorHashTable();
+/* -EDIT */
   static void deflate_idle_monitors();
   static int walk_monitor_list(ObjectMonitor** listheadp,
                                ObjectMonitor** FreeHeadp,
@@ -132,6 +138,7 @@ class ObjectSynchronizer : AllStatic {
   static ObjectMonitor * volatile gFreeList;
   static ObjectMonitor * volatile gOmInUseList; // for moribund thread, so monitors they inflated still get scanned
   static int gOmInUseCount;
+  static volatile int MonitorPopulation; /* +EDIT */
 
 };
 

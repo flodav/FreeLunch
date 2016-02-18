@@ -60,6 +60,23 @@ enum ThreadState {
 
 class OSThread: public CHeapObj<mtThread> {
   friend class VMStructs;
+ public:
+  /* +EDIT */
+  static intptr_t  th_id_counter;
+  static long long th_start         [MAX_THREADS];
+  static long long th_stop          [MAX_THREADS];
+
+  static long long th_cs_time       [MAX_THREADS];
+  static long long th_wait_time     [MAX_THREADS];
+
+  static char*     th_name          [MAX_THREADS];
+  static int       th_type          [MAX_THREADS];
+
+  static long long th_cs_recursions [MAX_THREADS];
+  static long long th_cs_start      [MAX_THREADS];
+
+  static OSThread* osthread_array   [MAX_THREADS];
+  /* -EDIT */
  private:
   OSThreadStartFunc _start_proc;  // Thread start routine
   void* _start_parm;              // Thread start routine parameter
@@ -93,7 +110,7 @@ class OSThread: public CHeapObj<mtThread> {
   void print() const                                { print_on(tty); }
 
   // For java intrinsics:
-  static ByteSize interrupted_offset()            { return byte_offset_of(OSThread, _interrupted); }
+  static ByteSize interrupted_offset()             { return byte_offset_of(OSThread, _interrupted); }
 
   // Platform dependent stuff
 #ifdef TARGET_OS_FAMILY_linux
@@ -116,6 +133,14 @@ class OSThread: public CHeapObj<mtThread> {
   thread_id_t thread_id() const                   { return _thread_id; }
 
   void set_thread_id(thread_id_t id)              { _thread_id = id; }
+
+/** +EDIT */
+ public:
+  uintptr_t th_id;
+  long long cs_start, cs_recursions, cs_time, wait_time, cs_wait_time_tmp;
+
+  long long _prev_scheduled_time;
+/** -EDIT */
 
  private:
   // _thread_id is kernel thread id (similar to LWP id on Solaris). Each

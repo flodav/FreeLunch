@@ -129,6 +129,23 @@ private:
   // For debug long safepoint
   static void print_safepoint_timeout(SafepointTimeoutReason timeout_reason);
 
+/* +EDIT */
+#ifdef WITH_PHASES
+public:
+  static void compute_phase_statistics();
+  static void gather_data();
+
+#ifdef COUNT_LOCKED
+  static long long total_locked;
+  static long long phase_locked;
+#endif
+#ifdef COUNT_WAITED
+  static long long total_waited;
+  static long long phase_waited;
+#endif
+private:
+#endif
+/* -EDIT */
 public:
 
   // Main entry points

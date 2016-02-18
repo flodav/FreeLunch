@@ -516,6 +516,15 @@ void AttachListener::init() {
     listener_thread->set_threadObj(thread_oop());
     Threads::add(listener_thread);
     Thread::start(listener_thread);
+/* +EDIT */
+    {
+      ResourceMark rm;
+      const char* str = listener_thread->get_thread_name();
+      u_char *p = NEW_C_HEAP_ARRAY(u_char, strlen(str) + 1, mtInternal);
+      strcpy((char*) p, str);
+      OSThread::th_name[listener_thread->osthread()->th_id] = (char*) p;
+    }
+/* -EDIT */
   }
 }
 

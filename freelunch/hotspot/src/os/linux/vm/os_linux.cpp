@@ -970,6 +970,22 @@ bool os::create_thread(Thread* thread, ThreadType thr_type, size_t stack_size) {
       return false;
   }
 
+/* +EDIT */
+  clockid_t cid;
+  struct timespec ts;
+  int r = pthread_getcpuclockid(osthread->pthread_id(), &cid);
+  if (r != 0) {
+    perror("Error pthread_getcpuclockid");
+    exit(EXIT_FAILURE);
+  }
+  if (clock_gettime(cid, &ts) == -1) {
+    perror("Error clock_gettime");
+    exit(EXIT_FAILURE);
+  }
+
+  osthread->_prev_scheduled_time =  ts.tv_sec + (ts.tv_nsec / 1000000);
+/* -EDIT */
+
   // The thread is returned suspended (in state INITIALIZED),
   // and is started higher up in the call chain
   assert(state == INITIALIZED, "race condition");
@@ -1039,6 +1055,22 @@ bool os::create_attached_thread(JavaThread* thread) {
   // initialize signal mask for this thread
   // and save the caller's signal mask
   os::Linux::hotspot_sigmask(thread);
+
+/* +EDIT */
+  clockid_t cid;
+  struct timespec ts;
+  int r = pthread_getcpuclockid(osthread->pthread_id(), &cid);
+  if (r != 0) {
+    perror("Error pthread_getcpuclockid");
+    exit(EXIT_FAILURE);
+  }
+  if (clock_gettime(cid, &ts) == -1) {
+    perror("Error clock_gettime");
+    exit(EXIT_FAILURE);
+  }
+
+  osthread->_prev_scheduled_time =  ts.tv_sec + (ts.tv_nsec / 1000000);
+/* -EDIT */
 
   return true;
 }

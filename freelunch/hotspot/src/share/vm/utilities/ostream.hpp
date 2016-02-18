@@ -126,6 +126,9 @@ class outputStream : public ResourceObj {
 // ANSI C++ name collision
 extern outputStream* tty;           // tty output
 extern outputStream* gclog_or_tty;  // stream for gc log if -Xloggc:<f>, or tty
+/* +EDIT */
+extern outputStream* monitor_stream;
+/* -EDIT */
 
 class streamIndentor : public StackObj {
  private:

@@ -79,6 +79,9 @@
 #ifdef TARGET_OS_FAMILY_bsd
 # include "jvm_bsd.h"
 #endif
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 #include <errno.h>
 
@@ -2859,6 +2862,10 @@ JVM_ENTRY(void, JVM_StartThread(JNIEnv* env, jobject jthread))
       if (native_thread->osthread() != NULL) {
         // Note: the current thread is not being used within "prepare".
         native_thread->prepare(jthread);
+/* +EDIT */
+	FreeLunchRecordData::recordThreadName(native_thread->osthread()->th_id, 
+					      native_thread->get_thread_name());
+/* -EDIT */
       }
     }
   }

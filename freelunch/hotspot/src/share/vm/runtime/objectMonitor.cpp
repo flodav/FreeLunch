@@ -53,6 +53,10 @@
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
 #endif
+/* +EDIT */
+#include "jvmtifiles/jvmtiEnv.hpp"
+#include "prims/jvmtiExport.hpp"
+/* -EDIT */
 
 #if defined(__GNUC__) && !defined(IA64)
   // Need to inhibit inlining for older versions of GCC to avoid build-time failures
@@ -290,11 +294,32 @@ static volatile int InitDone       = 0 ;
 //
 // * See also http://blogs.sun.com/dave
 
+/* +EDIT */
+void ObjectMonitor::print_stack_trace(outputStream *st) {
+  int displayed_frames = MIN3(StackFramesDisplayedCount, current_stack_depth, MAX_STACK_DEPTH);
+  for (int i = 0; i < displayed_frames; i++) {
+    java_lang_Throwable::print_stack_element(st, stack_trace[i].method, stack_trace[i].location);
+  }
+}
+
+void ObjectMonitor::myprint(outputStream *st) {
+  st->print_cr("ptr:%p Klass:%s  current_phase_time:%lld total_cs:%lld prev_cs:%lld",
+	       this,
+	       _object_klass,
+	       _current_phase_cs_time,
+	       _total_cs_time,
+	       _prev_total_cs_time);
+}
+/* -EDIT */
+
 
 // -----------------------------------------------------------------------------
 // Enter support
 
 bool ObjectMonitor::try_enter(Thread* THREAD) {
+/* +EDIT */
+  guarantee(false, "Try_enter not instrumented");
+/* -EDIT */
   if (THREAD != _owner) {
     if (THREAD->is_lock_owned ((address)_owner)) {
        assert(_recursions == 0, "internal state error");
@@ -312,6 +337,30 @@ bool ObjectMonitor::try_enter(Thread* THREAD) {
     return true;
   }
 }
+
+/* +EDIT */
+#ifdef STACKTRACE_EACH_ACQUISITION
+void ObjectMonitor::take_trace(JavaThread *java_thread) {
+  // From JavaThread::print_stack_on()@thread.cpp:3051
+  if (java_thread->has_last_Java_frame()) {
+    ResourceMark rm;
+    HandleMark   hm;
+  
+    RegisterMap reg_map(java_thread);
+    vframe* start_vf = java_thread->last_java_vframe(&reg_map);
+    int count = 0;
+    for (vframe* f = start_vf; count < MAX_STACK_DEPTH && f; f = f->sender() ) {
+      if (f->is_java_frame()) {
+	javaVFrame* jvf = javaVFrame::cast(f);
+	m->stack_trace[count].method   = jvf->method();
+	m->stack_trace[count].location = jvf->bci();
+	count++;
+      }
+    }
+    m->current_stack_depth = count;
+  }
+#endif
+/* -EDIT */
 
 void ATTR ObjectMonitor::enter(TRAPS) {
   // The following code is ordered to check the most common cases first
@@ -347,6 +396,22 @@ void ATTR ObjectMonitor::enter(TRAPS) {
   // We've encountered genuine contention.
   assert (Self->_Stalled == 0, "invariant") ;
   Self->_Stalled = intptr_t(this) ;
+
+/* +EDIT */
+#ifdef STACKTRACE_EACH_ACQUISITION
+  take_trace((JavaThread *) Self);
+#endif
+
+#ifdef COUNT_LOCKED
+  Atomic::add_ptr(1, &SafepointSynchronize::phase_locked);
+#endif
+
+  // Start recording the time spent while waiting to acquire the lock.
+  unsigned long start_1, start_2;
+  unsigned long long start;
+  RDTSC(start_1, start_2);
+  start = start_1 | (start_2 << 32);
+/* -EDIT */
 
   // Try one round of spinning *before* enqueueing Self
   // and before going through the awkward and expensive state
@@ -413,6 +478,13 @@ void ATTR ObjectMonitor::enter(TRAPS) {
     }
     Self->set_current_pending_monitor(NULL);
   }
+
+/* +EDIT */
+  // Compute the time spent waiting to acquire the lock and add it to the total
+  // time spent to acquire all locks.
+  RDTSC(start_1, start_2);
+  _total_cs_time += (start_1 | (start_2 << 32)) - start;
+/* -EDIT */
 
   Atomic::dec_ptr(&_count);
   assert (_count >= 0, "invariant") ;
@@ -734,6 +806,14 @@ void ATTR ObjectMonitor::ReenterI (Thread * Self, ObjectWaiter * SelfNode) {
     assert (((JavaThread *)Self)->thread_state() != _thread_blocked, "invariant") ;
     JavaThread * jt = (JavaThread *) Self ;
 
+/* +EDIT */
+#ifdef NEW_IMPLEMENTATION
+    unsigned long start_1, start_2;
+    unsigned long long start;
+    RDTSC(start_1, start_2);
+    start = start_1 | (start_2 << 32);
+#endif
+/* -EDIT */
     int nWakeups = 0 ;
     for (;;) {
         ObjectWaiter::TStates v = SelfNode->TState ;
@@ -796,6 +876,12 @@ void ATTR ObjectMonitor::ReenterI (Thread * Self, ObjectWaiter * SelfNode) {
         }
     }
 
+/* +EDIT */
+#ifdef NEW_IMPLEMENTATION
+    RDTSC(start_1, start_2);
+    _total_cs_time += (start_1 | (start_2 << 32)) - start;
+#endif
+/* -EDIT */
     // Self has acquired the lock -- Unlink Self from the cxq or EntryList .
     // Normally we'll find Self on the EntryList.
     // Unlinking from the EntryList is constant-time and atomic-free.
@@ -1437,6 +1523,11 @@ void ObjectMonitor::post_monitor_wait_event(EventJavaMonitorWait* event,
 //
 // Note: a subset of changes to ObjectMonitor::wait()
 // will need to be replicated in complete_exit above
+/* +EDIT */
+#ifdef WITH_PROGRESSIVE_WAIT
+long long volatile ObjectMonitor::tab_wait_time[MAX_THREADS];
+#endif
+/* -EDIT */
 void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
    Thread * const Self = THREAD ;
    assert(Self->is_Java_thread(), "Must be Java thread!");
@@ -1494,9 +1585,41 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
       _Responsible = NULL ;
    }
    intptr_t save = _recursions; // record the old recursion count
+/* +EDIT */
+#ifdef COUNT_WAITED
+   Atomic::add_ptr(1, &SafepointSynchronize::phase_waited);
+#endif
+
+   long long inflated      = _inflated_by_another_thread;
+   long long cs_start_time = _cs_start_time;
+   _inflated_by_another_thread = 0;
+   _cs_start_time              = 0;
+#if (defined WITH_NORMAL_WAIT || defined WITH_PROGRESSIVE_WAIT)
+   unsigned long start_1, start_2;
+   long long waited_time, start_wait_time;
+#endif
+/* -EDIT */
    _waiters++;                  // increment the number of waiters
    _recursions = 0;             // set the recursion level to be 1
    exit (true, Self) ;                    // exit the monitor
+/* +EDIT */
+#ifdef WITH_NORMAL_WAIT
+   RDTSC(start_1, start_2);
+   start_wait_time = (start_1 | (start_2 << 32));
+#endif
+#ifdef WITH_PROGRESSIVE_WAIT
+   int id = Self->osthread()->th_id;
+   RDTSC(start_1, start_2);
+   start_wait_time = (start_1 | (start_2 << 32));
+   ObjectMonitor::tab_wait_time[id] = start_wait_time; // tab_park_time[id] = start_wait_time;
+
+#ifdef DEBUG_PROGRESSIVE_WAIT
+   struct timeval tv;
+   gettimeofday(&tv, NULL);
+   tty->print_cr("[%.6lf] %.2d| %lld", tv.tv_sec+(tv.tv_usec/1000000.0), id, ObjectMonitor::tab_wait_time[id]);
+#endif
+#endif
+/* -EDIT */
    guarantee (_owner != Self, "invariant") ;
 
    // As soon as the ObjectMonitor's ownership is dropped in the exit()
@@ -1608,6 +1731,34 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
 
      assert (_owner != Self, "invariant") ;
      ObjectWaiter::TStates v = node.TState ;
+/* +EDIT */
+#ifdef WITH_NORMAL_WAIT
+     RDTSC(start_1, start_2);
+     waited_time = (start_1 | (start_2 << 32)) - start_wait_time;
+     Self->osthread()->wait_time += waited_time;
+#endif
+
+#ifdef WITH_PROGRESSIVE_WAIT
+     RDTSC(start_1, start_2);
+     waited_time = (start_1 | (start_2 << 32)) - ObjectMonitor::tab_wait_time[id]; // unsigned long long duration = (start_1 | (start_2 << 32)) - tab_park_time[id];
+#ifdef DEBUG_PROGRESSIVE_WAIT
+     gettimeofday(&tv, NULL);
+     tty->print_cr("[%.6lf] %.2d| %lld - %lld (+ %lld)", 
+		   tv.tv_sec+(tv.tv_usec/1000000.0), 
+		   id, 
+		   (start_1 | (start_2 << 32)) , 
+		   ObjectMonitor::tab_wait_time[id], 
+		   CYCLES_TO_MILLISEC(waited_time));
+#endif
+     ObjectMonitor::tab_wait_time[id] = 0;
+#endif
+
+     // struct timeval tv;
+     // gettimeofday(&tv, NULL);
+     // tty->print_cr("[%.6lf] %.2d|Acquiring",
+     // 		   tv.tv_sec+(tv.tv_usec/1000000.0), 
+     // 		   id);
+/* -EDIT */
      if (v == ObjectWaiter::TS_RUN) {
          enter (Self) ;
      } else {
@@ -1629,6 +1780,20 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
 
    guarantee (_recursions == 0, "invariant") ;
    _recursions = save;     // restore the old recursion count
+/* +EDIT */
+   _cs_start_time              = cs_start_time;
+   _inflated_by_another_thread = inflated;
+#ifdef WITH_NORMAL_WAIT
+   _total_wait_time += waited_time;
+   assert(waited_time > 0, "waited_time <= 0");
+   assert(_total_wait_time > 0, "_total_waited_time <= 0");
+#endif
+#ifdef WITH_PROGRESSIVE_WAIT
+   _total_wait_time += waited_time;
+   assert(waited_time > 0, "waited_time <= 0");
+   assert(_total_wait_time > 0, "_total_waited_time <= 0");
+#endif
+/* -EDIT */
    _waiters--;             // decrement the number of waiters
 
    // Verify a few postconditions
@@ -1718,6 +1883,12 @@ void ObjectMonitor::notify(TRAPS) {
         }
      } else
      if (Policy == 2) {      // prepend to cxq
+/* +EDIT */
+       guarantee (iterator->_time_notified == 0, "iterator->_time_notified != 0");
+       unsigned long start_1, start_2;
+       RDTSC(start_1, start_2);
+       iterator->_time_notified = start_1 | (start_2 << 32);
+/* -EDIT */
          // prepend to cxq
          if (List == NULL) {
              iterator->_next = iterator->_prev = NULL ;
@@ -1847,6 +2018,12 @@ void ObjectMonitor::notifyAll(TRAPS) {
         }
      } else
      if (Policy == 2) {      // prepend to cxq
+/* +EDIT */
+       guarantee (iterator->_time_notified == 0, "iterator->_time_notified != 0");
+       unsigned long start_1, start_2;
+       RDTSC(start_1, start_2);
+       iterator->_time_notified = start_1 | (start_2 << 32);
+/* -EDIT */
          // prepend to cxq
          iterator->TState = ObjectWaiter::TS_CXQ ;
          for (;;) {
@@ -2276,6 +2453,9 @@ ObjectWaiter::ObjectWaiter(Thread* thread) {
   _thread   = thread;
   _event    = thread->_ParkEvent ;
   _active   = false;
+/* +EDIT */
+  _time_notified = 0;
+/* -EDIT */
   assert (_event != NULL, "invariant") ;
 }
 

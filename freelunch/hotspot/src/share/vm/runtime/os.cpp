@@ -62,6 +62,9 @@
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
 #endif
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 # include <signal.h>
 
@@ -372,6 +375,10 @@ void os::signal_init() {
       signal_thread->set_threadObj(thread_oop());
       Threads::add(signal_thread);
       Thread::start(signal_thread);
+/* +EDIT */
+      FreeLunchRecordData::recordThreadName(signal_thread->osthread()->th_id, 
+					    signal_thread->get_thread_name());
+/* -EDIT */
     }
     // Handle ^BREAK
     os::signal(SIGBREAK, os::user_handler());

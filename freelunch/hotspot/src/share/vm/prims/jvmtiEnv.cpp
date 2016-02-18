@@ -59,6 +59,9 @@
 #include "services/threadService.hpp"
 #include "utilities/exceptions.hpp"
 #include "utilities/preserveException.hpp"
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 
 
 #define FIXLATER 0 // REMOVE this when completed.
@@ -1137,6 +1140,10 @@ JvmtiEnv::RunAgentThread(jthread thread, jvmtiStartFunction proc, const void* ar
     new_thread->set_threadObj(thread_hndl());
     Threads::add(new_thread);
     Thread::start(new_thread);
+/* +EDIT */
+    FreeLunchRecordData::recordThreadName(new_thread->osthread()->th_id,
+					  new_thread->get_thread_name());
+/* -EDIT */
   } // unlock Threads_lock
 
   return JVMTI_ERROR_NONE;

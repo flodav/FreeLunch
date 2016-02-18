@@ -37,6 +37,9 @@
   }
   void set_thread_type(int type) {
     _thread_type = type;
+/* +EDIT */
+    th_type[th_id] = type;
+/* -EDIT */
   }
 
   // _pthread_id is the pthread id, which is used by library calls
