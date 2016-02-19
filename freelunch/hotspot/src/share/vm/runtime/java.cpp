@@ -64,6 +64,9 @@
 #include "utilities/histogram.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/vmError.hpp"
+/* +EDIT */
+#include "runtime/profiling.hpp"
+/* -EDIT */
 #ifdef TARGET_ARCH_x86
 # include "vm_version_x86.hpp"
 #endif
@@ -444,6 +447,12 @@ extern "C" {
   }
 }
 
+/* +EDIT */
+extern long _end_last_phase_ms;
+extern long long _prev_phase_time;
+extern long long minimum_time_between_phases;
+/* -EDIT */
+
 // Note: before_exit() can be executed only once, if more than one threads
 //       are trying to shutdown the VM at the same time, only one thread
 //       can run before_exit() and all other threads must wait.
@@ -473,6 +482,43 @@ void before_exit(JavaThread * thread) {
       return;
     }
   }
+
+/* +EDIT */
+  // Reset minimum_time_between_phases to force the last CSP computation.
+  minimum_time_between_phases = 0;
+  SafepointSynchronize::gather_data();
+  SafepointSynchronize::compute_phase_statistics();
+
+  // Stop after the last CSP computation
+  FreeLunchStats::application_stop();
+
+#ifdef WITH_MONITOR_ASSOCIATION // TODO: is it still necessary ?
+  if (PrintLockCSPSummary)
+    FreeLunchStats::printLockCSPSummary();
+
+  if (PrintLockStackTraceSummary)
+    FreeLunchStats::printLockStackTraceSummary();
+
+  if (PrintLockingFrequencyStat)
+    FreeLunchStats::printLockingFrequencyStat();
+#endif
+
+  // for (int i = 0; i < MAX_THREADS; i++)
+  //   if (OSThread::osthread_array[i] != NULL) OSThread::th_stop[i] = _stop_application_time;
+
+  if (PrintThreadStats) {
+    monitor_stream->print_cr("------- th_start th_stop th_cs_and_wait_time th_wait_time th_name th_type th_cs_start th_cs_recursions");
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+      if (OSThread::th_start[i] == 0 && OSThread::th_stop[i] == 0)
+	break;
+
+      monitor_stream->print("%d|%lld|%lld|%lld|%lld|%s", i, OSThread::th_start[i], OSThread::th_stop[i],
+			    OSThread::th_cs_time[i], OSThread::th_wait_time[i], OSThread::th_name[i]);
+      /* DEBUG: */ monitor_stream->print_cr("|%lld|%lld", OSThread::th_cs_start[i], OSThread::th_cs_recursions[i]);
+    }
+  }
+/* -EDIT */
 
   // The only difference between this and Win32's _onexit procs is that
   // this version is invoked before any threads get killed.
