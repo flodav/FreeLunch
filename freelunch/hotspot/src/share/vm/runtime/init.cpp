@@ -36,12 +36,8 @@
 #include "runtime/sharedRuntime.hpp"
 #include "utilities/macros.hpp"
 /* +EDIT */
-#include "runtime/objectMonitor.hpp"
-#include "runtime/osThread.hpp"
-#include "runtime/task.hpp"
-
-#include "runtime/synchronizer.hpp"
 #include "runtime/profiling.hpp"
+#include "runtime/task.hpp"
 /* +EDIT */
 
 // Initialization done by VM thread in vm_init_globals()
