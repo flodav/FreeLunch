@@ -1155,7 +1155,9 @@ class CommandLineFlags {
           "Print the stack trace for every lock of the application")        \
                                                                             \
   product(bool, PrintLockingFrequencyStat, false,                           \
-          "and COUNT_WAITED enabled in macros.hpp to work")                 \
+          "Print the locking and calls to Object.wait() frequency."         \
+          "COUNT_LOCKED and COUNT_WAITED macros must be enabled "           \
+          "(file macros.hpp) to make it work to work")                      \
                                                                             \
   product(bool, PrintThreadStats, false,                                    \
           "Stats about thread CSP. Not working")                            \
