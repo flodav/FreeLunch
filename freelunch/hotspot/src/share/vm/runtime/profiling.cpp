@@ -100,7 +100,7 @@ static int monitorSort_comparison(const void *ptr1, const void *ptr2) {
 
 void FreeLunchStats::printLockCSPSummary() {// TODO: voir safepoint.cpp:570 ->     // application_time += (_current_phase_time - _prev_phase_time) * number_of_threads - current_phase_wait_time - accumulated_phase_park_time;
   monitor_stream->print_cr("-----------------------------------------------------");
-  monitor_stream->print_cr("Monitors ranked by average CSP (Threshold: %.2f %%)", CSPThresholdSummary);
+  monitor_stream->print_cr("Monitors ranked by average CSP (CSPThresholdSummary: %.2f %%)", CSPThresholdSummary);
   monitor_stream->print_cr("Rank   Average CSP         Object class");
 
   struct monitorSort *monitors_array = NEW_C_HEAP_ARRAY(struct monitorSort, ObjectSynchronizer::MonitorPopulation * sizeof(struct monitorSort), mtInternal);
@@ -145,7 +145,7 @@ void FreeLunchStats::printLockCSPSummary() {// TODO: voir safepoint.cpp:570 ->  
 // PrintLockStackTraceSummary
 void FreeLunchStats::printLockStackTraceSummary() {
   monitor_stream->print_cr("-----------------------------------------------------");
-  monitor_stream->print_cr("Monitors ranked by average CSP (Threshold: %.2f %%)", CSPThresholdSummary);
+  monitor_stream->print_cr("Monitors ranked by average CSP (CSPThresholdSummary: %.2f %%)", CSPThresholdSummary);
   monitor_stream->print_cr("Displaying the associated stack trace (%d frame(s) displayed maximum)", StackFramesDisplayedCount);
   monitor_stream->print_cr("Rank   Average CSP         Object class");
 
