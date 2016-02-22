@@ -46,7 +46,7 @@ compile it from source.
 
 ### Using precompiled binaries
 
-1. Download binaries from the latest release.
+1. Download binaries from the [latest release](https://github.com/flodav/FreeLunch/releases/download/259ea53f/freelunch-linux-amd64.tar.gz).
 2. Extract the archive.
 3. The `java` binary is located under `bin/` directory.
 
