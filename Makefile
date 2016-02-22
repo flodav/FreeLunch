@@ -29,6 +29,17 @@ config-slowdebug:
 configureall:
 	make config-release config-slowdebug config-fastdebug
 
+
+# Export binaries (release only)
+
+image:
+	make -C $(DIR) images
+	ln -s freelunch/build/linux-x86_64-normal-server-release/images/j2re-image freelunch-jre
+	tar czfh freelunch-jre.tar.gz freelunch-jre
+	rm freelunch-jre
+#	tar czf freelunch-sdk.tar.gz freelunch/build/linux-x86_64-normal-server-release/images/j2sdk-image
+
+
 # Cleaning
 
 clean:
