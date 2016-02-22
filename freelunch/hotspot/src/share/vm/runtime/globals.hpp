@@ -1121,11 +1121,10 @@ class CommandLineFlags {
                                                                             \
   product(intx, MinimumTimeBetweenTwoPhases, 1000,                          \
           "Minimum time between 2 phases (in ms.)"                          \
-          "Used to avoid too many safepoints during a small amount of time" \
-          "Disabled by default.")                                           \
+          "Used to avoid too many safepoints during a small amount of time")\
                                                                             \
   product(uintx, CSPThreshold, 0,                                           \
-          "Print the current phase CSP only if the value is above the"      \
+          "Print the current phase CSP only if it is above the"             \
           "provided value"                                                  \
           "Disabled by default.")                                           \
                                                                             \
@@ -1136,7 +1135,7 @@ class CommandLineFlags {
                                                                             \
   product(float, CSPThresholdSummary, 0.01,                                 \
           "Do not print locks for which the CSP "                           \
-          "is below the provided value"                                     \
+          "is below the provided value (in %)"                              \
           "Default value is 0.01.")                                         \
                                                                             \
   product(uintx, KContentedLocksPhase, 1,                                   \
@@ -1152,12 +1151,13 @@ class CommandLineFlags {
           "every lock of the application")                                  \
                                                                             \
   product(bool, PrintLockStackTraceSummary, true,                           \
-          "Print the stack trace for every lock of the application")        \
+          "Print a summary of the average CSP for every lock of the "       \
+          "application along with a stack trace to locate the lock.")       \
                                                                             \
   product(bool, PrintLockingFrequencyStat, false,                           \
-          "Print the locking and calls to Object.wait() frequency."         \
+          "Print the global locking and calls to Object.wait() frequency."  \
           "COUNT_LOCKED and COUNT_WAITED macros must be enabled "           \
-          "(file macros.hpp) to make it work to work")                      \
+          "(file macros.hpp) to work")                                      \
                                                                             \
   product(bool, PrintThreadStats, false,                                    \
           "Stats about thread CSP. Not working")                            \
